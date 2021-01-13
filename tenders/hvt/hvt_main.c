@@ -125,8 +125,12 @@ static void usage(const char *prog)
     exit(1);
 }
 
+#include <time.h>
+struct timespec main_entry_time;
+
 int main(int argc, char **argv)
 {
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &main_entry_time);
     size_t mem_size = 0x20000000;
     hvt_gpa_t gpa_ep, gpa_kend;
     const char *prog;

@@ -37,6 +37,7 @@
 #include "hvt.h"
 #include "hvt_kvm.h"
 #include "hvt_cpu_x86_64.h"
+#include <time.h>
 
 void hvt_mem_size(size_t *mem_size) {
     hvt_x86_mem_size(mem_size);
@@ -150,11 +151,26 @@ void hvt_vcpu_init(struct hvt *hvt, hvt_gpa_t gpa_ep,
     *cmdline = (char *)(hvt->mem + X86_CMDLINE_BASE);
 }
 
+struct timespec diff(struct timespec start, struct timespec end)
+{
+       struct timespec temp;
+       if ((end.tv_nsec-start.tv_nsec)<0) {
+               temp.tv_sec = end.tv_sec-start.tv_sec-1;
+               temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+       } else {
+               temp.tv_sec = end.tv_sec-start.tv_sec;
+               temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+       }
+       return temp;
+}
+
+struct timespec time1, time2, main_entry_time;
 int hvt_vcpu_loop(struct hvt *hvt)
 {
     struct hvt_b *hvb = hvt->b;
     int ret;
 
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time1);
     while (1) {
         ret = ioctl(hvb->vcpufd, KVM_RUN, NULL);
         if (ret == -1 && errno == EINTR)
@@ -182,6 +198,17 @@ int hvt_vcpu_loop(struct hvt *hvt)
 
         switch (run->exit_reason) {
         case KVM_EXIT_IO: {
+            if (run->io.port == 1500) {
+                clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
+                errx(1, "solo5 startup: %lus, %luus (%lu ms)\n"
+                        "guest startup: %lus, %luus (%lu ms)\n",
+                        diff(main_entry_time, time1).tv_sec,
+                        diff(main_entry_time, time1).tv_nsec / 1000,
+                        diff(main_entry_time, time1).tv_nsec / 1000000,
+                        diff(time1, time2).tv_sec,
+                        diff(time1, time2).tv_nsec / 1000,
+                        diff(time1, time2).tv_nsec / 1000000);
+            }
             if (run->io.direction != KVM_EXIT_IO_OUT
                     || run->io.size != 4)
                 errx(1, "Invalid guest port access: port=0x%x", run->io.port);
