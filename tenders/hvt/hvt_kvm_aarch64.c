@@ -38,6 +38,7 @@
 #include "hvt.h"
 #include "hvt_kvm.h"
 #include "hvt_cpu_aarch64.h"
+#include <time.h>
 
 /*
  * KVM/ARM64 provides an interface to userspace to modify the
@@ -331,11 +332,27 @@ static inline uint32_t mmio_read32(void *data)
     return *(uint32_t *)data;
 }
 
+struct timespec diff(struct timespec start, struct timespec end)
+{
+       struct timespec temp;
+       if ((end.tv_nsec-start.tv_nsec)<0) {
+               temp.tv_sec = end.tv_sec-start.tv_sec-1;
+               temp.tv_nsec = 1000000000+end.tv_nsec-start.tv_nsec;
+       } else {
+               temp.tv_sec = end.tv_sec-start.tv_sec;
+               temp.tv_nsec = end.tv_nsec-start.tv_nsec;
+       }
+       return temp;
+}
+
+extern struct timespec main_entry_time;
+struct timespec time1, time2;
 int hvt_vcpu_loop(struct hvt *hvt)
 {
     struct hvt_b *hvb = hvt->b;
     int ret;
 
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time1);
     while (1) {
         ret = ioctl(hvb->vcpufd, KVM_RUN, NULL);
         if (ret == -1 && errno == EINTR)
@@ -370,6 +387,18 @@ int hvt_vcpu_loop(struct hvt *hvt)
                 errx(1, "Invalid guest mmio access: mmio=0x%llx", run->mmio.phys_addr);
 
             int nr = HVT_HYPERCALL_NR(run->mmio.phys_addr);
+
+            if (nr == 8) {
+                clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &time2);
+                errx(1, "solo5 startup: %lus, %luus (%lu ms)\n"
+                        "guest startup: %lus, %luus (%lu ms)\n",
+                        diff(main_entry_time, time1).tv_sec,
+                        diff(main_entry_time, time1).tv_nsec / 1000,
+                        diff(main_entry_time, time1).tv_nsec / 1000000,
+                        diff(time1, time2).tv_sec,
+                        diff(time1, time2).tv_nsec / 1000,
+                        diff(time1, time2).tv_nsec / 1000000);
+       }
 
             /* Guest has halted the CPU. */
             if (nr == HVT_HYPERCALL_HALT) {
